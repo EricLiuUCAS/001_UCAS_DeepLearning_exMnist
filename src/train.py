@@ -1,9 +1,7 @@
-import sys, os
-# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import os
 import argparse
 import logging
+
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -26,9 +24,10 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--gpu", type=int, default=0, help="GPU device id to use (default: 0)")
+    parser.add_argument("--data_dir", type=str, default="/data1/nliu/2025_homework/Pro_001_MNIST/data/MNIST/", help="Path to MNIST data directory")
     return parser.parse_args()
 
-# 设置日志（仅显示级别和消息，不含日期）
+# 设置日志，格式只显示级别和消息
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s: %(message)s',
@@ -42,7 +41,7 @@ def train_epoch(model, train_loader, criterion, optimizer, epoch, use_gpu):
     """
     model.train()
     train_loss_total = 0
-    train_bar = tqdm(train_loader, desc=f"Train Epoch {epoch+1}", leave=False)
+    train_bar = tqdm(train_loader, desc=f"Epoch {epoch+1} [Train]", leave=False)
     for data, target in train_bar:
         if use_gpu:
             data, target = data.cuda(), target.cuda()
@@ -53,18 +52,19 @@ def train_epoch(model, train_loader, criterion, optimizer, epoch, use_gpu):
         loss.backward()
         optimizer.step()
         train_loss_total += loss.item() * data.size(0)
-        train_bar.set_postfix(loss=f"{loss.item():.4f}")
+        lr_current = optimizer.param_groups[0]['lr']
+        train_bar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr_current:.2e}")
     avg_train_loss = train_loss_total / len(train_loader.dataset)
     return avg_train_loss
 
 def test_epoch(model, test_loader, criterion, epoch, use_gpu):
     """
-    单个 epoch 的测试过程
+    单个 epoch 的验证过程
     """
     model.eval()
     test_loss_total = 0
     correct = 0
-    test_bar = tqdm(test_loader, desc=f"Test Epoch {epoch+1}", leave=False)
+    test_bar = tqdm(test_loader, desc=f"Epoch {epoch+1} [Val]", leave=False)
     with torch.no_grad():
         for data, target in test_bar:
             if use_gpu:
@@ -88,14 +88,23 @@ def main():
     batch_size = args.batch_size
     lr = args.lr
 
-    # 判断 GPU 可用性，并设置使用指定 GPU
+    # 判断 GPU 可用性，并设置指定 GPU
     use_gpu = torch.cuda.is_available()
     if use_gpu:
         torch.cuda.set_device(args.gpu)
     kwargs = {'num_workers': 8, 'pin_memory': True} if use_gpu else {}
 
-    # 数据加载
-    train_loader, test_loader = setup_data(batch_size, kwargs)
+    # 数据加载（通过 data_dir 参数指定数据路径）
+    train_loader, test_loader = setup_data(batch_size, kwargs, args.data_dir)
+
+    # 数据验证：检查样本数量与 batch 数是否匹配预期
+    train_samples = len(train_loader.dataset)
+    test_samples = len(test_loader.dataset)
+    train_batches = len(train_loader)
+    test_batches = len(test_loader)
+    logger.info("Data Verification:")
+    logger.info(f"Train samples: {train_samples} (Batches: {train_batches}, Expected: {batch_size}*{train_batches} = {batch_size * train_batches})")
+    logger.info(f"Test samples: {test_samples} (Batches: {test_batches}, Expected: {batch_size}*{test_batches} = {batch_size * test_batches})")
 
     # 模型定义与初始化
     model = LeNet5()
@@ -104,6 +113,7 @@ def main():
     model.apply(weight_init)
 
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.99))
+    # optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     criterion = nn.CrossEntropyLoss(reduction='sum')
 
     # 断点续训处理
@@ -117,31 +127,38 @@ def main():
     else:
         logger.info("Starting training from scratch.")
 
-    # 记录每个 epoch 的指标
+    # 用于记录训练过程中的指标
     train_loss_history = []
     test_loss_history = []
     accuracy_history = []
 
     for epoch in range(start_epoch, total_epochs):
         logger.info(f"Epoch {epoch+1}/{total_epochs}")
+        logger.info("Start Train")
         train_loss = train_epoch(model, train_loader, criterion, optimizer, epoch, use_gpu)
+        logger.info("Finish Train")
         logger.info(f"Train Loss: {train_loss:.6f}")
         train_loss_history.append(train_loss)
+
+        logger.info("Start Validation")
         test_loss, accuracy = test_epoch(model, test_loader, criterion, epoch, use_gpu)
+        logger.info("Finish Validation")
         logger.info(f"Test Loss: {test_loss:.6f}, Accuracy: {accuracy:.2f}%")
         test_loss_history.append(test_loss)
         accuracy_history.append(accuracy)
+
+        # 保存当前 epoch 的模型至 save_checkpoints 目录下
         ckpt_name = os.path.join("save_checkpoints", f"LeNet5_epoch_{epoch+1}.pth")
         torch.save(model.state_dict(), ckpt_name)
         logger.info(f"Checkpoint saved: {ckpt_name}")
 
-    # 加载最终模型并测试
+    # 加载最终模型并测试最终准确率
     final_ckpt = os.path.join("save_checkpoints", f"LeNet5_epoch_{total_epochs}.pth")
     model.load_state_dict(torch.load(final_ckpt))
     final_test_loss, final_accuracy = test_epoch(model, test_loader, criterion, total_epochs, use_gpu)
     logger.info(f"Final Test Accuracy: {final_accuracy:.2f}%")
 
-    # 绘制 loss 曲线并保存到 logs 目录下
+    # 绘制并保存 loss 曲线到 logs 目录下
     plt.figure(figsize=(10, 6))
     epochs = list(range(start_epoch+1, total_epochs+1))
     plt.plot(epochs, train_loss_history, label="Train Loss", marker='o')
