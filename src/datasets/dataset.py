@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 
-def dataread(image, label, data_dir='./data/MNIST/'):
+def dataread(image, label, data_dir='/data1/nliu/2025_homework/Pro_001_MNIST/data/MNIST'):
     """
     读取 MNIST 数据（gzip 格式）
     :param image: 图像文件名

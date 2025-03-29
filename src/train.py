@@ -1,7 +1,9 @@
+import sys, os
+# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import os
 import argparse
 import logging
-
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -9,8 +11,8 @@ from torch.autograd import Variable
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from src.datasets.dataset import setup_data
-from src.models.lenet5 import LeNet5, weight_init
+from datasets.dataset import setup_data
+from models.lenet5 import LeNet5, weight_init
 
 def parse_args():
     """
